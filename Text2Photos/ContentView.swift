@@ -208,10 +208,10 @@ struct ContentView: View {
     
     private func loadRecentPhotos() async throws -> [NSImage] {
         // Generate dynamic search filter (SQL query + location) from search text using Foundation Models
-        let searchFilter = try await generateDynamicSearchFilter(from: searchText)
+        let searchSQL = try await generateDynamicSearchFilter(from: searchText)
         
         // Query SQLite database for UUIDs
-        let photoUUIDs = try await queryPhotosDatabase(with: searchFilter)
+        let photoUUIDs = try await queryPhotosDatabase(with: searchSQL)
         print("📊 SQLite query returned \(photoUUIDs.count) UUIDs")
         
         // Convert UUIDs to PHAssets
@@ -228,25 +228,6 @@ struct ContentView: View {
         }
         
         print("📊 Found \(fetchedAssets.count) PHAssets from UUIDs")
-        
-        // Apply location filtering if specified (additional client-side filtering)
-        if let locationFilter = searchFilter.locationFilter {
-            print("🌍 Applying additional location filter for \(locationFilter.locationName)")
-            
-            var matchedCount = 0
-            fetchedAssets = fetchedAssets.filter { asset in
-                guard let location = asset.location else {
-                    return false
-                }
-                
-                let matches = locationFilter.matches(location)
-                if matches {
-                    matchedCount += 1
-                }
-                return matches
-            }
-            print("🔍 Location filtering: \(matchedCount) matches")
-        }
         
         // Limit final results
         if fetchedAssets.count > 10 {
@@ -298,7 +279,7 @@ struct ContentView: View {
     
     // MARK: - SQLite Database Query
     
-    private func queryPhotosDatabase(with searchFilter: SearchFilter) async throws -> [UUID] {
+    private func queryPhotosDatabase(with searchSQL: String) async throws -> [UUID] {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
@@ -319,11 +300,10 @@ struct ContentView: View {
                     }
                     
                     // Build SQL query
-                    let sqlQuery = searchFilter.sqlQuery ?? self.buildDefaultQuery()
-                    print("🗄️ Executing SQL query: \(sqlQuery)")
+                    print("🗄️ Executing SQL query: \(searchSQL)")
                     
                     var statement: OpaquePointer?
-                    if sqlite3_prepare_v2(db, sqlQuery, -1, &statement, nil) != SQLITE_OK {
+                    if sqlite3_prepare_v2(db, searchSQL, -1, &statement, nil) != SQLITE_OK {
                         let errorMsg = String(cString: sqlite3_errmsg(db))
                         throw SearchError.predicateCreationFailed("SQL prepare failed: \(errorMsg)")
                     }
@@ -421,9 +401,8 @@ struct ContentView: View {
         }
     }
     
-    private func generateDynamicSearchFilter(from searchText: String) async throws -> SearchFilter {
+    private func generateDynamicSearchFilter(from searchText: String) async throws -> String {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return SearchFilter(sqlQuery: nil, locationFilter: nil) }
         
         // Check if Foundation Models is available
         let model = SystemLanguageModel.default
@@ -442,115 +421,106 @@ struct ContentView: View {
         
         // Create system instructions with SQL query examples instead of predicate examples
         let systemInstructions = """
-        You are an expert at analyzing natural language photo search queries and returning structured search filters for the macOS Photos SQLite database.
-        
-        Your task is to analyze the user's search query and return a JSON response with SQL query and location filter information.
-        
-        RESPONSE FORMAT (JSON):
-        {
-          "sqlQuery": "SQL SELECT query string or null",
-          "location": {
-            "latitude": number,
-            "longitude": number, 
-            "radiusKm": number,
-            "name": "string"
-          } or null
-        }
-        
-        RULES:
-        1. Return valid JSON only, no explanations, no markdown formatting, no code blocks
-        2. Use proper SQL syntax for Photos SQLite database
-        3. If no SQL query needed, set "sqlQuery": null
-        4. If no location filter needed, set "location": null
-        5. Always SELECT ZUUID as the first column
-        6. Base table is ZASSET for photos
-        7. Do NOT wrap JSON in ```json or ``` blocks
-        
-        PHOTOS DATABASE SCHEMA (key tables and columns):
-        - ZASSET: Main photo table
-          - ZUUID (TEXT): Unique identifier for photo
-          - ZDATECREATED (REAL): Creation timestamp (Core Data format)
-          - ZLATITUDE, ZLONGITUDE (REAL): GPS coordinates
-          - ZKIND (INTEGER): Media type (0=photo, 1=video)
-          - ZTRASHEDSTATE (INTEGER): 0=not trashed, 1=trashed
-          - ZFAVORITE (INTEGER): 0=not favorite, 1=favorite
-          - ZHIDDEN (INTEGER): 0=not hidden, 1=hidden
-          - ZPIXELWIDTH, ZPIXELHEIGHT (INTEGER): Image dimensions
-          - ZADDEDDATE (REAL): Date added to library
-          - ZMODIFICATIONDATE (REAL): Last modification date
-        
-        - ZADDITIONALASSETATTRIBUTES: Extended photo attributes
-          - ZASSET (INTEGER): Foreign key to ZASSET.Z_PK
-          - ZSCENECLASSIFICATION (TEXT): AI-generated scene labels
-          - ZKEYWORDS (TEXT): Keywords and tags
-        
-        - ZGENERICALBUM: Photo albums
-          - ZTITLE (TEXT): Album name
-          - ZKIND (INTEGER): Album type
-        
-        COMMON SQL PATTERNS:
-        - Always filter out trashed photos: WHERE ZTRASHEDSTATE = 0
-        - Photo only (not video): AND ZKIND = 0
-        - Sort by creation date: ORDER BY ZDATECREATED DESC
-        - Limit results: LIMIT 50
-        - Favorites: AND ZFAVORITE = 1
-        - Hidden photos: AND ZHIDDEN = 1
-        - Has location: AND ZLATITUDE IS NOT NULL AND ZLONGITUDE IS NOT NULL
-        - No location: AND (ZLATITUDE IS NULL OR ZLONGITUDE IS NULL)
-        - Date ranges: Use Core Data timestamp format (seconds since 2001-01-01 00:00:00 UTC)
-        
-        EXAMPLE RESPONSES:
-        
-        User: "favorite photos"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZFAVORITE = 1 ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "photos from San Francisco"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE IS NOT NULL AND ZLONGITUDE IS NOT NULL ORDER BY ZDATECREATED DESC LIMIT 50", "location": {"latitude": 37.7749, "longitude": -122.4194, "radiusKm": 25, "name": "San Francisco"}}
-        
-        User: "large photos"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZPIXELWIDTH > 2000 OR ZPIXELHEIGHT > 2000) ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "hidden photos"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZHIDDEN = 1 ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "photos with location"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE IS NOT NULL AND ZLONGITUDE IS NOT NULL ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "photos without location"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZLATITUDE IS NULL OR ZLONGITUDE IS NULL) ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "recent photos"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "portrait photos"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELHEIGHT > ZPIXELWIDTH ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        User: "landscape photos"
-        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELWIDTH > ZPIXELHEIGHT ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
-        
-        MAJOR CITIES COORDINATES:
-        - San Francisco: 37.7749, -122.4194 (radius: 25km)
-        - New York: 40.7128, -74.0060 (radius: 30km)
-        - Los Angeles: 34.0522, -118.2437 (radius: 35km)
-        - Chicago: 41.8781, -87.6298 (radius: 25km)
-        - London: 51.5074, -0.1278 (radius: 20km)
-        - Paris: 48.8566, 2.3522 (radius: 15km)
-        - Tokyo: 35.6762, 139.6503 (radius: 20km)
-        - Sydney: -33.8688, 151.2093 (radius: 20km)
-        - Berlin: 52.5200, 13.4050 (radius: 15km)
-        - Rome: 41.9028, 12.4964 (radius: 15km)
-        - Stockholm: 59.3293, 18.0686 (radius: 30km)
-        - Amsterdam: 52.3676, 4.9041 (radius: 15km)
-        - Barcelona: 41.3851, 2.1734 (radius: 20km)
-        
-        DATE HANDLING:
-        - Core Data timestamps are seconds since 2001-01-01 00:00:00 UTC
-        - To convert from NSDate: timestamp = date.timeIntervalSinceReferenceDate
-        - For "today": use current timestamp ranges
-        - For "this week/month/year": calculate appropriate timestamp ranges
-        
-        IMPORTANT: Return raw JSON only - no markdown code blocks, no explanations, no ```json formatting.
-        """
+You are an expert at analyzing natural language photo search queries and returning SQL queries for the macOS Photos SQLite database.
+
+Your task is to analyze the user's search query and return a SQL query reponse.
+
+RESPONSE FORMAT (SQL):
+```sql
+SELECT ZUUID FROM ...
+```
+
+RULES:
+1. Return valid SQL only without explanations
+2. Use proper SQL syntax for Photos SQLite database
+5. Always SELECT ZUUID as the first column
+6. Base table is ZASSET for photos
+7. Always wrap SQL response in ```sql blocks
+
+PHOTOS DATABASE SCHEMA (DDL subset):
+```sql
+CREATE TABLE ZASSET (
+  Z_PK INTEGER PRIMARY KEY,
+  ZUUID TEXT, -- Unique identifier for photo
+  ZDATECREATED REAL, -- Creation timestamp (Core Data absolute time)
+  ZLATITUDE REAL, -- GPS latitude
+  ZLONGITUDE REAL, -- GPS longitude
+  ZKIND INTEGER, -- Media type (0=photo, 1=video)
+  ZTRASHEDSTATE INTEGER, -- 0=not trashed, 1=trashed
+  ZFAVORITE INTEGER, -- 0=not favorite, 1=favorite
+  ZHIDDEN INTEGER, -- 0=not hidden, 1=hidden
+  ZPIXELWIDTH INTEGER, -- Image width in pixels
+  ZPIXELHEIGHT INTEGER, -- Image height in pixels
+  ZADDEDDATE REAL, -- Date added (Core Data absolute time)
+  ZMODIFICATIONDATE REAL -- Last modification date (Core Data absolute time)
+);
+```
+
+```sql
+CREATE TABLE ZADDITIONALASSETATTRIBUTES (
+  Z_PK INTEGER PRIMARY KEY,
+  ZASSET INTEGER, -- Foreign key to ZASSET.Z_PK
+  ZSCENECLASSIFICATION TEXT, -- AI-generated scene labels
+  ZKEYWORDS TEXT, -- Keywords and tags
+  FOREIGN KEY(ZASSET) REFERENCES ZASSET(Z_PK)
+);
+```
+
+```sql
+CREATE TABLE ZGENERICALBUM (
+  Z_PK INTEGER PRIMARY KEY,
+  ZTITLE TEXT, -- Album name
+  ZKIND INTEGER -- Album type
+);
+```
+
+COMMON SQL PATTERNS:
+- Always filter out trashed photos: `WHERE ZTRASHEDSTATE = 0`
+- Photo only (not video): `AND ZKIND = 0`
+- Sort by creation date: `ORDER BY ZDATECREATED DESC`
+- Limit results: `LIMIT 50`
+- Favorites: `AND ZFAVORITE = 1`
+- Hidden photos: `AND ZHIDDEN = 1`
+- Location: `AND ZLATITUDE BETWEEN`
+- Date ranges in sqlite timestamp format: `AND ZDATECREATED > (strftime('%s','now','-1 days')`
+
+EXAMPLE RESPONSES:
+
+Q: favorite photos
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZFAVORITE = 1 ORDER BY ZDATECREATED DESC LIMIT 50
+```
+
+Q: photos from San Francisco
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE BETWEEN 37.60 AND 37.90 AND ZLONGITUDE BETWEEN -123.00 AND -122.20 ORDER BY ZDATECREATED DESC LIMIT 50
+```
+
+Q: photos from this month
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZDATECREATED > (strftime('%s','now','-30 days') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50
+```
+
+Q: large photos
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZPIXELWIDTH > 2000 OR ZPIXELHEIGHT > 2000) ORDER BY ZDATECREATED DESC LIMIT 50
+```
+
+Q: hidden photos
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZHIDDEN = 1 ORDER BY ZDATECREATED DESC LIMIT 50
+```
+
+Q: recent photos
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 ORDER BY ZDATECREATED DESC LIMIT 50
+```
+
+Q: portrait photos
+A: ```sql
+SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELHEIGHT > ZPIXELWIDTH ORDER BY ZDATECREATED DESC LIMIT 50
+```
+"""
         
         do {
             // Create session with system instructions
@@ -558,64 +528,20 @@ struct ContentView: View {
             
             // Generate structured response from user query
             let response = try await session.respond(to: query)
-            let rawJsonString = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawSQLString = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             
             // Clean the response - remove markdown code blocks if present
-            let jsonString: String
-            if rawJsonString.hasPrefix("```json") && rawJsonString.hasSuffix("```") {
+            let sqlString: String
+            if rawSQLString.hasPrefix("```sql") && rawSQLString.hasSuffix("```") {
                 // Remove ```json at start and ``` at end
-                let startIndex = rawJsonString.index(rawJsonString.startIndex, offsetBy: 7) // "```json".count
-                let endIndex = rawJsonString.index(rawJsonString.endIndex, offsetBy: -3) // "```".count
-                jsonString = String(rawJsonString[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if rawJsonString.hasPrefix("```") && rawJsonString.hasSuffix("```") {
-                // Remove ``` at start and end
-                let startIndex = rawJsonString.index(rawJsonString.startIndex, offsetBy: 3)
-                let endIndex = rawJsonString.index(rawJsonString.endIndex, offsetBy: -3)
-                jsonString = String(rawJsonString[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let startIndex = rawSQLString.index(rawSQLString.startIndex, offsetBy: 7) // "```json".count
+                let endIndex = rawSQLString.index(rawSQLString.endIndex, offsetBy: -3) // "```".count
+                sqlString = String(rawSQLString[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
-                jsonString = rawJsonString
+                sqlString = rawSQLString
             }
-            
-            print("🤖 AI Generated JSON response: '\(jsonString)' for query: '\(query)'")
-            
-            // Parse JSON response
-            guard let jsonData = jsonString.data(using: .utf8) else {
-                throw SearchError.predicateCreationFailed("Invalid JSON response")
-            }
-            
-            let jsonObject = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
-            guard let json = jsonObject else {
-                throw SearchError.predicateCreationFailed("Could not parse JSON response")
-            }
-            
-            // Extract SQL query
-            var sqlQuery: String? = nil
-            if let queryString = json["sqlQuery"] as? String {
-                print("🗄️ SQL Query from AI: '\(queryString)'")
-                sqlQuery = queryString
-            } else {
-                print("🔍 No SQL query specified")
-            }
-            
-            // Extract location filter
-            var locationFilter: LocationFilter? = nil
-            if let locationData = json["location"] as? [String: Any],
-               let lat = locationData["latitude"] as? Double,
-               let lng = locationData["longitude"] as? Double,
-               let radius = locationData["radiusKm"] as? Double,
-               let name = locationData["name"] as? String {
-                locationFilter = LocationFilter(
-                    centerLatitude: lat,
-                    centerLongitude: lng,
-                    radiusKm: radius,
-                    locationName: name
-                )
-                print("🌍 Location filter: \(name) at \(lat), \(lng) with \(radius)km radius")
-            } else {
-                print("📍 No location filter specified")
-            }
-            
-            return SearchFilter(sqlQuery: sqlQuery, locationFilter: locationFilter)
+          
+            return sqlString
             
         } catch let error as SearchError {
             throw error
@@ -628,3 +554,4 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+
