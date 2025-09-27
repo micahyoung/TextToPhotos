@@ -41,23 +41,23 @@ public let searchExamples: [[String: String]] = [
     ],
     [
         "question": "photos from this month",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZDATECREATED > (strftime('%s','now','-30 days') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZDATECREATED > (strftime('%s','now','start of month') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
+    ],
+    [
+        "question": "photos from 2024",
+        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZDATECREATED >= (strftime('%s','2024-01-01') - 978307200) AND ZDATECREATED < (strftime('%s','2025-01-01') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "large photos",
         "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZPIXELWIDTH > 2000 OR ZPIXELHEIGHT > 2000) ORDER BY ZDATECREATED DESC LIMIT 50"
     ],
     [
-        "question": "hidden photos",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZHIDDEN = 1 ORDER BY ZDATECREATED DESC LIMIT 50"
-    ],
-    [
-        "question": "recent photos",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 ORDER BY ZDATECREATED DESC LIMIT 50"
-    ],
-    [
         "question": "portrait photos",
         "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELHEIGHT > ZPIXELWIDTH ORDER BY ZDATECREATED DESC LIMIT 50"
+    ],
+    [
+        "question": "photos of Tina Turner",
+        "answer": "SELECT DISTINCT ZASSET.ZUUID FROM ZASSET INNER JOIN ZDETECTEDFACE ON ZDETECTEDFACE.ZASSETFORFACE = ZASSET.Z_PK INNER JOIN ZPERSON ON ZPERSON.Z_PK = ZDETECTEDFACE.ZPERSONFORFACE WHERE ZASSET.ZTRASHEDSTATE = 0 AND ZASSET.ZKIND = 0 AND ZPERSON.ZDISPLAYNAME LIKE '%Tina Turner%' ORDER BY ZASSET.ZDATECREATED DESC LIMIT 50"
     ]
 ]
 
@@ -98,9 +98,10 @@ SELECT ZUUID FROM ...
 RULES:
 1. Return valid SQL only without explanations
 2. Use proper SQL syntax for Photos SQLite database
-5. Always SELECT ZUUID as the first column
+5. Always SELECT ZASSET.ZUUID as the first column
 6. Base table is ZASSET for photos
-7. Always wrap SQL response in ```sql blocks
+7. Always include JOIN for any columns from other tables
+8. Always wrap SQL response in ```sql blocks
 
 PHOTOS DATABASE SCHEMA (DDL subset):
 ```sql
@@ -120,17 +121,19 @@ CREATE TABLE ZASSET (
   ZMODIFICATIONDATE REAL, -- Last modification date (Core Data absolute time)
   ZOVERALLAESTHETICSCORE REAL -- Machine-learned aesthetic quality score (higher is better); may be null
 );
-```
 
-COMMON SQL PATTERNS:
-- Always filter out trashed photos: `WHERE ZTRASHEDSTATE = 0`
-- Photo only (not video): `AND ZKIND = 0`
-- Sort by creation date: `ORDER BY ZDATECREATED DESC`
-- Limit results: `LIMIT 50`
-- Favorites: `AND ZFAVORITE = 1`
-- Hidden photos: `AND ZHIDDEN = 1`
-- Location: `AND ZLATITUDE BETWEEN`
-- Date ranges in sqlite timestamp format: `AND ZDATECREATED > (strftime('%s','now','-1 days')`
+CREATE TABLE ZPERSON (
+  Z_PK INTEGER PRIMARY KEY,
+  ZDISPLAYNAME TEXT, -- Person's display name (manually set or suggested)
+);
+
+CREATE TABLE ZDETECTEDFACE (
+  Z_PK INTEGER PRIMARY KEY,
+  ZASSETFORFACE INTEGER, -- Foreign key to ZASSET.Z_PK
+  ZPERSONFORFACE INTEGER, -- Foreign key to ZPERSON.Z_PK
+  ZCONFIDENCE REAL -- Confidence score for face detection/recognition
+);
+```
 
 EXAMPLE RESPONSES:
 
@@ -141,8 +144,9 @@ EXAMPLE RESPONSES:
         // Create session with system instructions
         let session = LanguageModelSession(instructions: systemInstructions)
 
-        // Generate structured response from user query
-        let response = try await session.respond(to: query)
+        // Generate structured response from user query with temperature setting
+        let options = GenerationOptions(temperature: 0.0)
+        let response = try await session.respond(to: query, options: options)
         let rawSQLString = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Clean the response - remove markdown code blocks if present

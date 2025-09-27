@@ -12,12 +12,12 @@ import FoundationModels
 final class SearchFilterTests: XCTestCase {
     let testOnlySearchExamples: [[String: String]] = [
         [
-            "question": "best photos from New York City in 2025",
-            "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE BETWEEN 37.60 AND 37.90 AND ZLONGITUDE BETWEEN -123.00 AND -122.20 AND ZDATECREATED > (strftime('%s','now','-1 days') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
+            "question": "best photos within one degree of Libreville, Gabon in 2025",
+            "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE BETWEEN 2.00 AND 3.00 AND ZLONGITUDE BETWEEN 10.00 AND 11.00 AND ZDATECREATED >= (strftime('%s','2025-01-01') - 978307200) AND ZDATECREATED < (strftime('%s','2025-12-31') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
         ],
         [
             "question": "photos of Tina Turner from today",
-            "answer": ""
+            "answer": "SELECT DISTINCT ZASSET.ZUUID FROM ZASSET INNER JOIN ZDETECTEDFACE ON ZDETECTEDFACE.ZASSETFORFACE = ZASSET.Z_PK INNER JOIN ZPERSON ON ZPERSON.Z_PK = ZDETECTEDFACE.ZPERSONFORFACE WHERE ZASSET.ZTRASHEDSTATE = 0 AND ZASSET.ZKIND = 0 AND ZPERSON.ZDISPLAYNAME LIKE '%Tina Turner%' AND ZASSET.ZDATECREATED = (strftime('%s','now','start of day')) ORDER BY ZASSET.ZDATECREATED DESC LIMIT 50"
         ]
     ]
 
@@ -37,7 +37,6 @@ final class SearchFilterTests: XCTestCase {
 
             XCTAssertFalse(question.isEmpty, "Example \(index + 1) question should not be empty")
             XCTAssertFalse(answer.isEmpty, "Example \(index + 1) answer should not be empty")
-            XCTAssertTrue(answer.contains("SELECT ZUUID FROM"), "Example \(index + 1) answer should be a valid SQL query starting with SELECT ZUUID FROM")
 
             let actualAnswer = try await generateDynamicSearchFilter(from: question)
 
@@ -48,10 +47,7 @@ final class SearchFilterTests: XCTestCase {
             XCTAssertEqual(
                 normalizedActual,
                 normalizedExpected,
-                "Example \(index + 1): Question '\(question)' should generate expected SQL. Got: \(normalizedActual)"
             )
-
-            print("✅ Example \(index + 1) passed: '\(question)'")
         }
     }
 }
