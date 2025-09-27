@@ -12,12 +12,12 @@ import FoundationModels
 final class SearchFilterTests: XCTestCase {
     let testOnlySearchExamples: [[String: String]] = [
         [
-            "question": "best photos within one degree of Libreville, Gabon in 2025",
-            "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE BETWEEN 2.00 AND 3.00 AND ZLONGITUDE BETWEEN 10.00 AND 11.00 AND ZDATECREATED >= (strftime('%s','2025-01-01') - 978307200) AND ZDATECREATED < (strftime('%s','2025-12-31') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
+            "question": "best photos within one degree N/E/S/W of Libreville, Gabon in 2025",
+            "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND (a.ZLATITUDE BETWEEN 2.00 AND 4.00 OR a.ZLONGITUDE BETWEEN 10.00 AND 12.00) AND a.ZDATECREATED >= (strftime('%s','2025-01-01') - 978307200) AND a.ZDATECREATED < (strftime('%s','2026-01-01') - 978307200) ORDER BY a.ZDATECREATED DESC LIMIT 50"
         ],
         [
             "question": "photos of Tina Turner from today",
-            "answer": "SELECT DISTINCT ZASSET.ZUUID FROM ZASSET INNER JOIN ZDETECTEDFACE ON ZDETECTEDFACE.ZASSETFORFACE = ZASSET.Z_PK INNER JOIN ZPERSON ON ZPERSON.Z_PK = ZDETECTEDFACE.ZPERSONFORFACE WHERE ZASSET.ZTRASHEDSTATE = 0 AND ZASSET.ZKIND = 0 AND ZPERSON.ZDISPLAYNAME LIKE '%Tina Turner%' AND ZASSET.ZDATECREATED = (strftime('%s','now','start of day')) ORDER BY ZASSET.ZDATECREATED DESC LIMIT 50"
+            "answer": "SELECT DISTINCT a.ZUUID FROM ZASSET a INNER JOIN ZDETECTEDFACE df ON df.ZASSETFORFACE = a.Z_PK INNER JOIN ZPERSON p ON p.Z_PK = df.ZPERSONFORFACE WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND p.ZDISPLAYNAME LIKE '%Tina Turner%' AND a.ZDATECREATED > (strftime('%s','now','start of day') - 978307200) ORDER BY a.ZDATECREATED DESC LIMIT 50"
         ]
     ]
 

@@ -29,35 +29,39 @@ enum SearchError: LocalizedError {
 public let searchExamples: [[String: String]] = [
     [
         "question": "favorite photos",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZFAVORITE = 1 ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND a.ZFAVORITE = 1 ORDER BY a.ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "best photos",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 ORDER BY ZOVERALLAESTHETICSCORE DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 ORDER BY a.ZOVERALLAESTHETICSCORE DESC LIMIT 50"
     ],
     [
         "question": "photos from San Francisco",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE BETWEEN 37.60 AND 37.90 AND ZLONGITUDE BETWEEN -123.00 AND -122.20 ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND a.ZLATITUDE BETWEEN 37.60 AND 37.90 AND a.ZLONGITUDE BETWEEN -123.00 AND -122.20 ORDER BY a.ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "photos from this month",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZDATECREATED > (strftime('%s','now','start of month') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND a.ZDATECREATED > (strftime('%s','now','start of month') - 978307200) ORDER BY a.ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "photos from 2024",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZDATECREATED >= (strftime('%s','2024-01-01') - 978307200) AND ZDATECREATED < (strftime('%s','2025-01-01') - 978307200) ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND a.ZDATECREATED >= (strftime('%s','2024-01-01') - 978307200) AND a.ZDATECREATED < (strftime('%s','2025-01-01') - 978307200) ORDER BY a.ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "large photos",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZPIXELWIDTH > 2000 OR ZPIXELHEIGHT > 2000) ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND (a.ZPIXELWIDTH > 2000 OR a.ZPIXELHEIGHT > 2000) ORDER BY a.ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "portrait photos",
-        "answer": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELHEIGHT > ZPIXELWIDTH ORDER BY ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT a.ZUUID FROM ZASSET a WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND a.ZPIXELHEIGHT > a.ZPIXELWIDTH ORDER BY a.ZDATECREATED DESC LIMIT 50"
     ],
     [
         "question": "photos of Tina Turner",
-        "answer": "SELECT DISTINCT ZASSET.ZUUID FROM ZASSET INNER JOIN ZDETECTEDFACE ON ZDETECTEDFACE.ZASSETFORFACE = ZASSET.Z_PK INNER JOIN ZPERSON ON ZPERSON.Z_PK = ZDETECTEDFACE.ZPERSONFORFACE WHERE ZASSET.ZTRASHEDSTATE = 0 AND ZASSET.ZKIND = 0 AND ZPERSON.ZDISPLAYNAME LIKE '%Tina Turner%' ORDER BY ZASSET.ZDATECREATED DESC LIMIT 50"
+        "answer": "SELECT DISTINCT a.ZUUID FROM ZASSET a INNER JOIN ZDETECTEDFACE df ON df.ZASSETFORFACE = a.Z_PK INNER JOIN ZPERSON p ON p.Z_PK = df.ZPERSONFORFACE WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND p.ZDISPLAYNAME LIKE '%Tina Turner%' ORDER BY a.ZDATECREATED DESC LIMIT 50"
+    ],
+    [
+        "question": "photos of my favorite people",
+        "answer": "SELECT DISTINCT a.ZUUID FROM ZASSET a INNER JOIN ZDETECTEDFACE df ON df.ZASSETFORFACE = a.Z_PK INNER JOIN ZPERSON p ON p.Z_PK = df.ZPERSONFORFACE WHERE a.ZTRASHEDSTATE = 0 AND a.ZKIND = 0 AND p.ZDISPLAYNAME IS NOT NULL AND p.ZDISPLAYNAME != '' GROUP BY a.ZUUID ORDER BY COUNT(DISTINCT p.Z_PK) DESC LIMIT 50"
     ]
 ]
 
@@ -92,16 +96,17 @@ Your task is to analyze the user's search query and return a SQL query reponse.
 
 RESPONSE FORMAT (SQL):
 ```sql
-SELECT ZUUID FROM ...
+SELECT a.ZUUID FROM ...
 ```
 
 RULES:
 1. Return valid SQL only without explanations
 2. Use proper SQL syntax for Photos SQLite database
-5. Always SELECT ZASSET.ZUUID as the first column
+5. Always SELECT a.ZUUID as the first column
 6. Base table is ZASSET for photos
 7. Always include JOIN for any columns from other tables
-8. Always wrap SQL response in ```sql blocks
+8. Always subtract offset of 978307200 when using relative time functions: "today" is `strftime('%s','now','start of day') - 978307200`
+9. Always wrap SQL response in ```sql blocks
 
 PHOTOS DATABASE SCHEMA (DDL subset):
 ```sql
@@ -131,7 +136,6 @@ CREATE TABLE ZDETECTEDFACE (
   Z_PK INTEGER PRIMARY KEY,
   ZASSETFORFACE INTEGER, -- Foreign key to ZASSET.Z_PK
   ZPERSONFORFACE INTEGER, -- Foreign key to ZPERSON.Z_PK
-  ZCONFIDENCE REAL -- Confidence score for face detection/recognition
 );
 ```
 
