@@ -10,6 +10,7 @@ import Photos
 import PhotosUI
 import FoundationModels
 import CoreLocation
+import SQLite3
 
 enum SearchError: LocalizedError {
     case foundationModelsNotAvailable(reason: String)
@@ -36,6 +37,12 @@ struct ContentView: View {
     @State private var authorizationStatus: PHAuthorizationStatus = .notDetermined
     @State private var foundationModelsAvailable = false
     @State private var searchError: String?
+    
+    // SQLite database path for macOS Photos
+    private var photosDBPath: String {
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+        return homeDirectory.appendingPathComponent("Pictures/Photos Library.photoslibrary/database/Photos.sqlite").path
+    }
     
     var body: some View {
         VStack(spacing: 30) {
@@ -113,6 +120,7 @@ struct ContentView: View {
         .onAppear {
             checkPhotoLibraryPermission()
             checkFoundationModelsAvailability()
+            validatePhotosDatabase()
         }
     }
     
@@ -199,72 +207,46 @@ struct ContentView: View {
     }
     
     private func loadRecentPhotos() async throws -> [NSImage] {
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.fetchLimit = 50 // Increase limit for location filtering
-        
-        // Generate dynamic search filter (predicate + location) from search text using Foundation Models
+        // Generate dynamic search filter (SQL query + location) from search text using Foundation Models
         let searchFilter = try await generateDynamicSearchFilter(from: searchText)
         
-        // Apply predicate if available
-        if let predicate = searchFilter.predicate {
-            fetchOptions.predicate = predicate
-            print("🔍 Applied predicate to fetch: \(predicate)")
-        } else {
-            print("🔍 No predicate applied - fetching all photos")
-        }
+        // Query SQLite database for UUIDs
+        let photoUUIDs = try await queryPhotosDatabase(with: searchFilter)
+        print("📊 SQLite query returned \(photoUUIDs.count) UUIDs")
         
-        let assets = PHAsset.fetchAssets(with: .image, options: fetchOptions)
-        print("📊 PHAsset fetch returned \(assets.count) assets")
-        
+        // Convert UUIDs to PHAssets
         var fetchedAssets: [PHAsset] = []
-        assets.enumerateObjects { asset, _, _ in
-            fetchedAssets.append(asset)
-        }
-        
-        print("📊 Total assets after enumeration: \(fetchedAssets.count)")
-        
-        // Log some sample assets for debugging
-        for (index, asset) in fetchedAssets.prefix(5).enumerated() {
-            let hasLocation = asset.location != nil
-            let locationString = if let loc = asset.location {
-                "\(loc.coordinate.latitude), \(loc.coordinate.longitude)"
-            } else {
-                "No GPS"
+        if !photoUUIDs.isEmpty {
+            let fetchOptions = PHFetchOptions()
+            let uuidStrings = photoUUIDs.map { $0.uuidString }
+            fetchOptions.predicate = NSPredicate(format: "uuid IN %@", uuidStrings)
+            
+            let assets = PHAsset.fetchAssets(with: fetchOptions)
+            assets.enumerateObjects { asset, _, _ in
+                fetchedAssets.append(asset)
             }
-            print("📸 Asset \(index + 1): Date=\(asset.creationDate?.description ?? "nil"), Location=\(locationString), MediaSubtypes=\(asset.mediaSubtypes.rawValue)")
         }
         
-        // Apply location filtering if specified
+        print("📊 Found \(fetchedAssets.count) PHAssets from UUIDs")
+        
+        // Apply location filtering if specified (additional client-side filtering)
         if let locationFilter = searchFilter.locationFilter {
-            print("🌍 Applying location filter for \(locationFilter.locationName)")
-            print("🎯 Filter center: \(locationFilter.centerLatitude), \(locationFilter.centerLongitude) with \(locationFilter.radiusKm)km radius")
+            print("🌍 Applying additional location filter for \(locationFilter.locationName)")
             
             var matchedCount = 0
             fetchedAssets = fetchedAssets.filter { asset in
                 guard let location = asset.location else {
-                    print("❌ Asset has no location data")
                     return false
                 }
                 
                 let matches = locationFilter.matches(location)
-                let distance = CLLocation(latitude: locationFilter.centerLatitude, longitude: locationFilter.centerLongitude)
-                    .distance(from: location) / 1000.0
-                
                 if matches {
                     matchedCount += 1
-                    print("✅ Asset matches location filter: \(location.coordinate.latitude), \(location.coordinate.longitude) (distance: \(String(format: "%.1f", distance))km)")
-                } else {
-                    print("❌ Asset outside radius: \(location.coordinate.latitude), \(location.coordinate.longitude) (distance: \(String(format: "%.1f", distance))km)")
                 }
                 return matches
             }
-            print("🔍 Location filtering: \(matchedCount) matches out of original \(assets.count) photos")
-        } else {
-            print("📍 No location filter applied")
+            print("🔍 Location filtering: \(matchedCount) matches")
         }
-        
-        print("📊 Final asset count before limiting: \(fetchedAssets.count)")
         
         // Limit final results
         if fetchedAssets.count > 10 {
@@ -274,6 +256,7 @@ struct ContentView: View {
         
         self.recentPhotos = fetchedAssets
         
+        // Load images from PHAssets
         let imageManager = PHImageManager.default()
         let requestOptions = PHImageRequestOptions()
         requestOptions.deliveryMode = .highQualityFormat
@@ -298,7 +281,6 @@ struct ContentView: View {
                     
                     if let image = image {
                         print("✅ Successfully loaded image \(index + 1)")
-                        // On macOS, PHImageManager returns NSImage directly
                         continuation.resume(returning: image)
                     } else {
                         print("❌ No image returned for asset \(index + 1)")
@@ -314,10 +296,115 @@ struct ContentView: View {
         return loadedImages
     }
     
-    // MARK: - Dynamic Predicate Generation with Foundation Models
+    // MARK: - SQLite Database Query
+    
+    private func queryPhotosDatabase(with searchFilter: SearchFilter) async throws -> [UUID] {
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    var db: OpaquePointer?
+                    
+                    // Check if database file exists
+                    guard FileManager.default.fileExists(atPath: self.photosDBPath) else {
+                        throw SearchError.predicateCreationFailed("Photos database not found at \(self.photosDBPath)")
+                    }
+                    
+                    // Open SQLite database
+                    if sqlite3_open_v2(self.photosDBPath, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+                        throw SearchError.predicateCreationFailed("Cannot open Photos database")
+                    }
+                    
+                    defer {
+                        sqlite3_close(db)
+                    }
+                    
+                    // Build SQL query
+                    let sqlQuery = searchFilter.sqlQuery ?? self.buildDefaultQuery()
+                    print("🗄️ Executing SQL query: \(sqlQuery)")
+                    
+                    var statement: OpaquePointer?
+                    if sqlite3_prepare_v2(db, sqlQuery, -1, &statement, nil) != SQLITE_OK {
+                        let errorMsg = String(cString: sqlite3_errmsg(db))
+                        throw SearchError.predicateCreationFailed("SQL prepare failed: \(errorMsg)")
+                    }
+                    
+                    defer {
+                        sqlite3_finalize(statement)
+                    }
+                    
+                    var uuids: [UUID] = []
+                    
+                    // Execute query and collect UUIDs
+                    while sqlite3_step(statement) == SQLITE_ROW {
+                        if let uuidCString = sqlite3_column_text(statement, 0) {
+                            let uuidString = String(cString: uuidCString)
+                            if let uuid = UUID(uuidString: uuidString) {
+                                uuids.append(uuid)
+                            }
+                        }
+                    }
+                    
+                    print("🗄️ SQLite query returned \(uuids.count) UUIDs")
+                    continuation.resume(returning: uuids)
+                    
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func buildDefaultQuery() -> String {
+        return """
+        SELECT ZUUID FROM ZASSET 
+        WHERE ZTRASHEDSTATE = 0 
+        AND ZKIND = 0
+        ORDER BY ZDATECREATED DESC 
+        LIMIT 50
+        """
+    }
+    
+    // MARK: - Database Validation (for testing)
+    
+    private func validatePhotosDatabase() {
+        Task {
+            do {
+                print("🗄️ Checking Photos database at: \(photosDBPath)")
+                guard FileManager.default.fileExists(atPath: photosDBPath) else {
+                    print("❌ Photos database not found")
+                    return
+                }
+                
+                var db: OpaquePointer?
+                guard sqlite3_open_v2(photosDBPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+                    print("❌ Cannot open Photos database")
+                    return
+                }
+                
+                defer { sqlite3_close(db) }
+                
+                // Check if ZASSET table exists and count records
+                let countQuery = "SELECT COUNT(*) FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0"
+                var statement: OpaquePointer?
+                
+                if sqlite3_prepare_v2(db, countQuery, -1, &statement, nil) == SQLITE_OK {
+                    if sqlite3_step(statement) == SQLITE_ROW {
+                        let count = sqlite3_column_int(statement, 0)
+                        print("✅ Found \(count) photos in database")
+                    }
+                    sqlite3_finalize(statement)
+                } else {
+                    let error = String(cString: sqlite3_errmsg(db))
+                    print("❌ Database query failed: \(error)")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Dynamic SQL Query Generation with Foundation Models
     
     struct SearchFilter {
-        let predicate: NSPredicate?
+        let sqlQuery: String?
         let locationFilter: LocationFilter?
     }
     
@@ -336,7 +423,7 @@ struct ContentView: View {
     
     private func generateDynamicSearchFilter(from searchText: String) async throws -> SearchFilter {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return SearchFilter(predicate: nil, locationFilter: nil) }
+        guard !query.isEmpty else { return SearchFilter(sqlQuery: nil, locationFilter: nil) }
         
         // Check if Foundation Models is available
         let model = SystemLanguageModel.default
@@ -353,15 +440,15 @@ struct ContentView: View {
             throw SearchError.foundationModelsNotAvailable(reason: "Unknown reason: \(other)")
         }
         
-        // Create system instructions with both predicate and location filter examples
+        // Create system instructions with SQL query examples instead of predicate examples
         let systemInstructions = """
-        You are an expert at analyzing natural language photo search queries and returning structured search filters.
+        You are an expert at analyzing natural language photo search queries and returning structured search filters for the macOS Photos SQLite database.
         
-        Your task is to analyze the user's search query and return a JSON response with both predicate and location filter information.
+        Your task is to analyze the user's search query and return a JSON response with SQL query and location filter information.
         
         RESPONSE FORMAT (JSON):
         {
-          "predicate": "NSPredicate format string or null",
+          "sqlQuery": "SQL SELECT query string or null",
           "location": {
             "latitude": number,
             "longitude": number, 
@@ -372,52 +459,74 @@ struct ContentView: View {
         
         RULES:
         1. Return valid JSON only, no explanations, no markdown formatting, no code blocks
-        2. Use proper NSPredicate syntax for PHAsset properties
-        3. If no predicate needed, set "predicate": null
+        2. Use proper SQL syntax for Photos SQLite database
+        3. If no SQL query needed, set "sqlQuery": null
         4. If no location filter needed, set "location": null
-        5. For location queries, include both predicate "location != NULL" AND location filter details
-        6. Do NOT wrap JSON in ```json or ``` blocks
+        5. Always SELECT ZUUID as the first column
+        6. Base table is ZASSET for photos
+        7. Do NOT wrap JSON in ```json or ``` blocks
         
-        AVAILABLE PHRASSET PROPERTIES:
-        - creationDate (Date) - when photo was taken
-        - modificationDate (Date) - when photo was last modified
-        - location (CLLocation?) - GPS location data (can only check for NULL/not NULL in predicate)
-        - mediaType (PHAssetMediaType) - .image, .video, .audio
-        - mediaSubtypes (PHAssetMediaSubtype) - .photoScreenshot, .photoPanorama, .photoHDR, .photoLive, .photoDepthEffect
-        - pixelWidth, pixelHeight (Int) - image dimensions
-        - favorite (Bool) - whether photo is marked as favorite
-        - hidden (Bool) - whether photo is hidden
-        - burstIdentifier (String?) - burst sequence identifier
-        - representsBurst (Bool) - whether this is the key photo from a burst
+        PHOTOS DATABASE SCHEMA (key tables and columns):
+        - ZASSET: Main photo table
+          - ZUUID (TEXT): Unique identifier for photo
+          - ZDATECREATED (REAL): Creation timestamp (Core Data format)
+          - ZLATITUDE, ZLONGITUDE (REAL): GPS coordinates
+          - ZKIND (INTEGER): Media type (0=photo, 1=video)
+          - ZTRASHEDSTATE (INTEGER): 0=not trashed, 1=trashed
+          - ZFAVORITE (INTEGER): 0=not favorite, 1=favorite
+          - ZHIDDEN (INTEGER): 0=not hidden, 1=hidden
+          - ZPIXELWIDTH, ZPIXELHEIGHT (INTEGER): Image dimensions
+          - ZADDEDDATE (REAL): Date added to library
+          - ZMODIFICATIONDATE (REAL): Last modification date
+        
+        - ZADDITIONALASSETATTRIBUTES: Extended photo attributes
+          - ZASSET (INTEGER): Foreign key to ZASSET.Z_PK
+          - ZSCENECLASSIFICATION (TEXT): AI-generated scene labels
+          - ZKEYWORDS (TEXT): Keywords and tags
+        
+        - ZGENERICALBUM: Photo albums
+          - ZTITLE (TEXT): Album name
+          - ZKIND (INTEGER): Album type
+        
+        COMMON SQL PATTERNS:
+        - Always filter out trashed photos: WHERE ZTRASHEDSTATE = 0
+        - Photo only (not video): AND ZKIND = 0
+        - Sort by creation date: ORDER BY ZDATECREATED DESC
+        - Limit results: LIMIT 50
+        - Favorites: AND ZFAVORITE = 1
+        - Hidden photos: AND ZHIDDEN = 1
+        - Has location: AND ZLATITUDE IS NOT NULL AND ZLONGITUDE IS NOT NULL
+        - No location: AND (ZLATITUDE IS NULL OR ZLONGITUDE IS NULL)
+        - Date ranges: Use Core Data timestamp format (seconds since 2001-01-01 00:00:00 UTC)
         
         EXAMPLE RESPONSES:
         
         User: "favorite photos"
-        Response: {"predicate": "favorite == YES", "location": null}
-        
-        User: "screenshots from today"
-        Response: {"predicate": "mediaSubtypes & 4 != 0 AND creationDate >= %@ AND creationDate < %@", "location": null}
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZFAVORITE = 1 ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
         User: "photos from San Francisco"
-        Response: {"predicate": "location != NULL", "location": {"latitude": 37.7749, "longitude": -122.4194, "radiusKm": 25, "name": "San Francisco"}}
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE IS NOT NULL AND ZLONGITUDE IS NOT NULL ORDER BY ZDATECREATED DESC LIMIT 50", "location": {"latitude": 37.7749, "longitude": -122.4194, "radiusKm": 25, "name": "San Francisco"}}
         
-        User: "photos from Stockholm this month"
-        Response: {"predicate": "location != NULL AND creationDate >= %@ AND creationDate < %@", "location": {"latitude": 59.3293, "longitude": 18.0686, "radiusKm": 30, "name": "Stockholm"}}
+        User: "large photos"
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZPIXELWIDTH > 2000 OR ZPIXELHEIGHT > 2000) ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
-        User: "favorite photos from New York"
-        Response: {"predicate": "favorite == YES AND location != NULL", "location": {"latitude": 40.7128, "longitude": -74.0060, "radiusKm": 30, "name": "New York"}}
+        User: "hidden photos"
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZHIDDEN = 1 ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
         User: "photos with location"
-        Response: {"predicate": "location != NULL", "location": null}
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZLATITUDE IS NOT NULL AND ZLONGITUDE IS NOT NULL ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
         User: "photos without location"
-        Response: {"predicate": "location == NULL", "location": null}
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND (ZLATITUDE IS NULL OR ZLONGITUDE IS NULL) ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
-        User: "large portrait photos"
-        Response: {"predicate": "pixelHeight > pixelWidth AND (pixelWidth > 2000 OR pixelHeight > 2000)", "location": null}
+        User: "recent photos"
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
-        User: "HDR photos from London"
-        Response: {"predicate": "mediaSubtypes & 8 != 0 AND location != NULL", "location": {"latitude": 51.5074, "longitude": -0.1278, "radiusKm": 20, "name": "London"}}
+        User: "portrait photos"
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELHEIGHT > ZPIXELWIDTH ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
+        
+        User: "landscape photos"
+        Response: {"sqlQuery": "SELECT ZUUID FROM ZASSET WHERE ZTRASHEDSTATE = 0 AND ZKIND = 0 AND ZPIXELWIDTH > ZPIXELHEIGHT ORDER BY ZDATECREATED DESC LIMIT 50", "location": null}
         
         MAJOR CITIES COORDINATES:
         - San Francisco: 37.7749, -122.4194 (radius: 25km)
@@ -434,12 +543,11 @@ struct ContentView: View {
         - Amsterdam: 52.3676, 4.9041 (radius: 15km)
         - Barcelona: 41.3851, 2.1734 (radius: 20km)
         
-        MEDIASUBTYPE VALUES:
-        - photoScreenshot: 4
-        - photoPanorama: 2  
-        - photoHDR: 8
-        - photoLive: 16
-        - photoDepthEffect: 32
+        DATE HANDLING:
+        - Core Data timestamps are seconds since 2001-01-01 00:00:00 UTC
+        - To convert from NSDate: timestamp = date.timeIntervalSinceReferenceDate
+        - For "today": use current timestamp ranges
+        - For "this week/month/year": calculate appropriate timestamp ranges
         
         IMPORTANT: Return raw JSON only - no markdown code blocks, no explanations, no ```json formatting.
         """
@@ -480,20 +588,13 @@ struct ContentView: View {
                 throw SearchError.predicateCreationFailed("Could not parse JSON response")
             }
             
-            // Extract predicate
-            var predicate: NSPredicate? = nil
-            if let predicateString = json["predicate"] as? String {
-                print("🔧 Creating predicate from: '\(predicateString)'")
-                
-                if predicateString.contains("%@") {
-                    print("📅 Predicate contains date placeholders, handling date logic...")
-                    predicate = try handleDatePredicate(predicateString, for: query)
-                } else {
-                    predicate = NSPredicate(format: predicateString)
-                    print("✅ Successfully created predicate: \(predicate!)")
-                }
+            // Extract SQL query
+            var sqlQuery: String? = nil
+            if let queryString = json["sqlQuery"] as? String {
+                print("🗄️ SQL Query from AI: '\(queryString)'")
+                sqlQuery = queryString
             } else {
-                print("🔍 No predicate specified")
+                print("🔍 No SQL query specified")
             }
             
             // Extract location filter
@@ -514,79 +615,13 @@ struct ContentView: View {
                 print("📍 No location filter specified")
             }
             
-            return SearchFilter(predicate: predicate, locationFilter: locationFilter)
+            return SearchFilter(sqlQuery: sqlQuery, locationFilter: locationFilter)
             
         } catch let error as SearchError {
             throw error
         } catch {
             throw SearchError.foundationModelsError(error)
         }
-    }
-    
-    private func generateDynamicPredicate(from searchText: String) async throws -> NSPredicate? {
-        let searchFilter = try await generateDynamicSearchFilter(from: searchText)
-        return searchFilter.predicate
-    }
-    
-    private func handleDatePredicate(_ predicateFormat: String, for query: String) throws -> NSPredicate? {
-        print("📅 Handling date predicate: '\(predicateFormat)' for query: '\(query)'")
-        
-        let calendar = Calendar.current
-        let now = Date()
-        let query = query.lowercased()
-        
-        // Determine the date range based on the query
-        var startDate: Date?
-        var endDate: Date?
-        
-        if query.contains("today") {
-            startDate = calendar.startOfDay(for: now)
-            endDate = calendar.date(byAdding: .day, value: 1, to: startDate!)
-            print("🗓️ Detected 'today' - start: \(startDate!), end: \(endDate!)")
-        } else if query.contains("yesterday") {
-            let yesterday = calendar.date(byAdding: .day, value: -1, to: now)!
-            startDate = calendar.startOfDay(for: yesterday)
-            endDate = calendar.date(byAdding: .day, value: 1, to: startDate!)
-            print("🗓️ Detected 'yesterday' - start: \(startDate!), end: \(endDate!)")
-        } else if query.contains("this week") || query.contains("week") {
-            startDate = calendar.dateInterval(of: .weekOfYear, for: now)?.start
-            endDate = now
-            print("🗓️ Detected 'week' - start: \(startDate!), end: \(endDate!)")
-        } else if query.contains("last week") {
-            let lastWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: now)!
-            startDate = calendar.dateInterval(of: .weekOfYear, for: lastWeek)?.start
-            endDate = calendar.date(byAdding: .weekOfYear, value: 1, to: startDate!)
-            print("🗓️ Detected 'last week' - start: \(startDate!), end: \(endDate!)")
-        } else if query.contains("this month") || query.contains("month") {
-            startDate = calendar.dateInterval(of: .month, for: now)?.start
-            endDate = now
-            print("🗓️ Detected 'month' - start: \(startDate!), end: \(endDate!)")
-        } else if query.contains("last month") {
-            let lastMonth = calendar.date(byAdding: .month, value: -1, to: now)!
-            startDate = calendar.dateInterval(of: .month, for: lastMonth)?.start
-            endDate = calendar.date(byAdding: .month, value: 1, to: startDate!)
-            print("🗓️ Detected 'last month' - start: \(startDate!), end: \(endDate!)")
-        } else if query.contains("this year") || query.contains("year") {
-            startDate = calendar.dateInterval(of: .year, for: now)?.start
-            endDate = now
-            print("🗓️ Detected 'year' - start: \(startDate!), end: \(endDate!)")
-        } else {
-            print("⚠️ No date pattern matched for query: '\(query)'")
-        }
-        
-        // Create predicate with actual dates
-        if let start = startDate, let end = endDate {
-            let finalPredicate = NSPredicate(format: predicateFormat, start as NSDate, end as NSDate)
-            print("✅ Created date range predicate: \(finalPredicate)")
-            return finalPredicate
-        } else if let start = startDate {
-            let finalPredicate = NSPredicate(format: "creationDate >= %@", start as NSDate)
-            print("✅ Created single date predicate: \(finalPredicate)")
-            return finalPredicate
-        }
-        
-        print("❌ Failed to create date predicate from: '\(predicateFormat)'")
-        throw SearchError.predicateCreationFailed(predicateFormat)
     }
 }
 
