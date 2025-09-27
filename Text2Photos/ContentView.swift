@@ -21,6 +21,19 @@ struct ContentView: View {
     @State private var authorizationStatus: PHAuthorizationStatus = .notDetermined
     @State private var foundationModelsAvailable = false
     @State private var searchError: String?
+    @State private var hasSearched = false
+    @State private var showSQLDrawer = false
+    @State private var currentSearchSQL = ""
+    
+    // MARK: - Layout Constants
+    private let gridItemMinWidth: CGFloat = 150
+    private let gridItemMaxWidth: CGFloat = 200
+    private let gridItemHeight: CGFloat = 150
+    private let gridItemSpacing: CGFloat = 10
+    private let horizontalPadding: CGFloat = 40
+    
+    // Use minimum width for consistent display
+    private var gridItemWidth: CGFloat { gridItemMinWidth }
     
     // SQLite database path for macOS Photos
     private var photosDBPath: String {
@@ -38,47 +51,118 @@ struct ContentView: View {
             // Search interface
             VStack(spacing: 16) {
                 VStack(spacing: 8) {
-                    TextField("Enter your search text...", text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.body)
-                        .submitLabel(.search)
-                        .onSubmit {
+                    HStack(spacing: 12) {
+                        TextField("Enter your search text...", text: $searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body)
+                            .submitLabel(.search)
+                            .onSubmit {
+                                performSearch()
+                            }
+                        
+                        Button(isLoading ? "Loading..." : "Search") {
                             performSearch()
                         }
-                    
-                    HStack {
-                        Image(systemName: foundationModelsAvailable ? "brain.head.profile" : "brain.head.profile.fill")
-                            .foregroundColor(foundationModelsAvailable ? .green : .orange)
-                        Text(foundationModelsAvailable ? "AI-powered search enabled" : "Using fallback search")
-                            .font(.caption)
-                            .foregroundColor(foundationModelsAvailable ? .green : .orange)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
+                    
+                    // SQL Drawer - moved here from bottom
+                    if hasSearched && showSQLDrawer {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("SQL Query")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Spacer()
+                                
+                                Button(action: {
+                                    showSQLDrawer = false
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            
+                            ScrollView {
+                                Text(currentSearchSQL)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(Color(NSColor.controlBackgroundColor))
+                                    .cornerRadius(6)
+                            }
+                            .frame(minHeight: 24)
+                        }
+                        .padding()
+                        .background(Color(NSColor.windowBackgroundColor))
+                        .overlay(
+                            Rectangle()
+                                .frame(height: 1)
+                                .foregroundColor(Color(NSColor.separatorColor)),
+                            alignment: .top
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.easeInOut(duration: 0.3), value: showSQLDrawer)
+                    }
+
+                    Button(action: {
+                        showSQLDrawer.toggle()
+                    }) {
+                        HStack {
+                            if isLoading {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                Text("Searching...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else if !photoImages.isEmpty {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .foregroundColor(.blue)
+                                Text("\(photoImages.count) photo\(photoImages.count == 1 ? "" : "s") found")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else if hasSearched {
+                                Image(systemName: "photo.badge.exclamationmark")
+                                    .foregroundColor(.orange)
+                                Text("No photos found")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Image(systemName: foundationModelsAvailable ? "brain.head.profile" : "brain.head.profile.fill")
+                                    .foregroundColor(foundationModelsAvailable ? .green : .orange)
+                                Text(foundationModelsAvailable ? "AI-powered search enabled" : "Using fallback search")
+                                    .font(.caption)
+                                    .foregroundColor(foundationModelsAvailable ? .green : .orange)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
-                
-                Button(isLoading ? "Loading..." : "Submit") {
-                    performSearch()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, horizontalPadding)
             
+
             // Photos display area
             if !photoImages.isEmpty {
                 ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: gridItemMinWidth, maximum: gridItemMaxWidth), spacing: gridItemSpacing)], spacing: gridItemSpacing) {
                         ForEach(Array(photoImages.enumerated()), id: \.offset) { index, image in
                             Image(nsImage: image)
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
-                                .frame(width: 150, height: 150)
+                                .frame(width: gridItemWidth, height: gridItemHeight)
                                 .clipped()
                                 .cornerRadius(8)
                         }
                     }
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, horizontalPadding)
                 }
-                .frame(maxHeight: 400)
             }
             
             if authorizationStatus == .denied {
@@ -95,7 +179,7 @@ struct ContentView: View {
                     .padding()
                     .background(Color.red.opacity(0.1))
                     .cornerRadius(8)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, horizontalPadding)
             }
             
             Spacer()
@@ -114,6 +198,9 @@ struct ContentView: View {
         guard !trimmedText.isEmpty else { return }
         
         searchError = nil // Clear any previous error
+        hasSearched = true // Mark that a search has been performed
+        showSQLDrawer = false // Reset drawer state for new search
+        currentSearchSQL = "" // Clear previous SQL
         print("Searching for: \(trimmedText)")
         fetchRecentPhotos()
     }
@@ -194,6 +281,11 @@ struct ContentView: View {
         // Generate dynamic search filter (SQL query + location) from search text using Foundation Models
         let searchSQL = try await generateDynamicSearchFilter(from: searchText)
         
+        // Store the SQL for display in the drawer
+        await MainActor.run {
+            self.currentSearchSQL = searchSQL
+        }
+        
         // Query SQLite database for UUIDs
         let photoUUIDs = try await queryPhotosDatabase(with: searchSQL)
         print("📊 SQLite query returned \(photoUUIDs.count) UUIDs")
@@ -213,10 +305,11 @@ struct ContentView: View {
         
         print("📊 Found \(fetchedAssets.count) PHAssets from UUIDs")
         
-        // Limit final results
-        if fetchedAssets.count > 10 {
-            fetchedAssets = Array(fetchedAssets.prefix(10))
-            print("📊 Limited to 10 assets")
+        // Calculate dynamic limit based on screen size and grid layout
+        let maxLimit = 64
+        if fetchedAssets.count > maxLimit {
+            fetchedAssets = Array(fetchedAssets.prefix(maxLimit))
+            print("📊 Limited to \(maxLimit) assets based on screen size")
         }
         
         self.recentPhotos = fetchedAssets
@@ -316,16 +409,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-    
-    private func buildDefaultQuery() -> String {
-        return """
-        SELECT ZUUID FROM ZASSET 
-        WHERE ZTRASHEDSTATE = 0 
-        AND ZKIND = 0
-        ORDER BY ZDATECREATED DESC 
-        LIMIT 50
-        """
     }
     
     // MARK: - Database Validation (for testing)
