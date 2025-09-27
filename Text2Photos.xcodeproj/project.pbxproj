@@ -6,14 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		CED0E5D52E88547C00C4594B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CE84957C2E83FD9C00D1F7CD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CE8495832E83FD9C00D1F7CD;
+			remoteInfo = Text2Photos;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		CE8495842E83FD9C00D1F7CD /* Text2Photos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Text2Photos.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CED0E5D12E88547C00C4594B /* Text2PhotosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Text2PhotosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CED0E5DF2E88567100C4594B /* Text2Photos.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = Text2Photos.xctestplan; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		CE8495862E83FD9C00D1F7CD /* Text2Photos */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Text2Photos;
+			sourceTree = "<group>";
+		};
+		CED0E5D22E88547C00C4594B /* Text2PhotosTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Text2PhotosTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -26,13 +43,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CED0E5CE2E88547C00C4594B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		CE84957B2E83FD9C00D1F7CD = {
 			isa = PBXGroup;
 			children = (
+				CED0E5DF2E88567100C4594B /* Text2Photos.xctestplan */,
 				CE8495862E83FD9C00D1F7CD /* Text2Photos */,
+				CED0E5D22E88547C00C4594B /* Text2PhotosTests */,
 				CE8495852E83FD9C00D1F7CD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +67,7 @@
 			isa = PBXGroup;
 			children = (
 				CE8495842E83FD9C00D1F7CD /* Text2Photos.app */,
+				CED0E5D12E88547C00C4594B /* Text2PhotosTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +97,29 @@
 			productReference = CE8495842E83FD9C00D1F7CD /* Text2Photos.app */;
 			productType = "com.apple.product-type.application";
 		};
+		CED0E5D02E88547C00C4594B /* Text2PhotosTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CED0E5D92E88547C00C4594B /* Build configuration list for PBXNativeTarget "Text2PhotosTests" */;
+			buildPhases = (
+				CED0E5CD2E88547C00C4594B /* Sources */,
+				CED0E5CE2E88547C00C4594B /* Frameworks */,
+				CED0E5CF2E88547C00C4594B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CED0E5D62E88547C00C4594B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CED0E5D22E88547C00C4594B /* Text2PhotosTests */,
+			);
+			name = Text2PhotosTests;
+			packageProductDependencies = (
+			);
+			productName = Text2PhotosTests;
+			productReference = CED0E5D12E88547C00C4594B /* Text2PhotosTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +132,10 @@
 				TargetAttributes = {
 					CE8495832E83FD9C00D1F7CD = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					CED0E5D02E88547C00C4594B = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = CE8495832E83FD9C00D1F7CD;
 					};
 				};
 			};
@@ -100,12 +154,20 @@
 			projectRoot = "";
 			targets = (
 				CE8495832E83FD9C00D1F7CD /* Text2Photos */,
+				CED0E5D02E88547C00C4594B /* Text2PhotosTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		CE8495822E83FD9C00D1F7CD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CED0E5CF2E88547C00C4594B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +184,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CED0E5CD2E88547C00C4594B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CED0E5D62E88547C00C4594B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CE8495832E83FD9C00D1F7CD /* Text2Photos */;
+			targetProxy = CED0E5D52E88547C00C4594B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		CE84958D2E83FD9D00D1F7CD /* Debug */ = {
@@ -349,6 +426,58 @@
 			};
 			name = Release;
 		};
+		CED0E5D72E88547C00C4594B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6426KR8W6D;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = micahyoung.Text2PhotosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Text2Photos.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Text2Photos";
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		CED0E5D82E88547C00C4594B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6426KR8W6D;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = micahyoung.Text2PhotosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Text2Photos.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Text2Photos";
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -366,6 +495,15 @@
 			buildConfigurations = (
 				CE8495902E83FD9D00D1F7CD /* Debug */,
 				CE8495912E83FD9D00D1F7CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CED0E5D92E88547C00C4594B /* Build configuration list for PBXNativeTarget "Text2PhotosTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CED0E5D72E88547C00C4594B /* Debug */,
+				CED0E5D82E88547C00C4594B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

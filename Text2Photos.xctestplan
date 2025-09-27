@@ -1,0 +1,30 @@
+{
+  "configurations" : [
+    {
+      "id" : "14A4BAF9-E393-4513-98D0-97A0574259E9",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Text2Photos.xcodeproj",
+      "identifier" : "CE8495832E83FD9C00D1F7CD",
+      "name" : "Text2Photos"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Text2Photos.xcodeproj",
+        "identifier" : "CED0E5D02E88547C00C4594B",
+        "name" : "Text2PhotosTests"
+      }
+    }
+  ],
+  "version" : 1
+}
