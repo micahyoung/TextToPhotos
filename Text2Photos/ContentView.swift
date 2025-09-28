@@ -24,6 +24,11 @@ struct ContentView: View {
     @State private var hasSearched = false
     @State private var showSQLDrawer = false
     @State private var currentSearchSQL = ""
+    @State private var generationClient: GenerationClientProtocol? = nil
+    @State private var openAIBaseUrl = "https://api.openai.com"
+    @State private var openAIApiKey = ""
+    @State private var openAIModel = "gpt-4o"
+
     
     // MARK: - Layout Constants
     private let gridItemMinWidth: CGFloat = 150
@@ -66,6 +71,22 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
                         .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    if showSQLDrawer {
+                        HStack(spacing: 8) {
+                            TextField("OpenAI URL", text: $openAIBaseUrl)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body)
+                            
+                            TextField("Model", text: $openAIModel)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body)
+                            
+                            SecureField("API Key", text: $openAIApiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body)
+                        }
                     }
                     
                     // SQL Drawer - moved here from bottom
@@ -201,6 +222,12 @@ struct ContentView: View {
         hasSearched = true // Mark that a search has been performed
         showSQLDrawer = false // Reset drawer state for new search
         currentSearchSQL = "" // Clear previous SQL
+        if !openAIBaseUrl.isEmpty && !openAIModel.isEmpty && !openAIApiKey.isEmpty {
+            generationClient = OpenAIGenerationClient(baseURL: openAIBaseUrl, model: openAIModel, apiKey: openAIApiKey)
+        } else {
+            generationClient = AppleGenerationClient()
+        }
+
         print("Searching for: \(trimmedText)")
         fetchRecentPhotos()
     }
@@ -278,8 +305,13 @@ struct ContentView: View {
     }
     
     private func loadRecentPhotos() async throws -> [NSImage] {
+        // Ensure we have a generation client
+        guard let client = generationClient else {
+            throw SearchError.predicateCreationFailed("No generation client available")
+        }
+        
         // Generate dynamic search filter (SQL query + location) from search text using Foundation Models
-        let searchSQL = try await generateDynamicSearchFilter(from: searchText)
+        let searchSQL = try await generateDynamicSearchFilter(from: searchText, client: client)
         
         // Store the SQL for display in the drawer
         await MainActor.run {
